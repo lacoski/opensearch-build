@@ -167,3 +167,66 @@ docker run -it \
 ```
 
 Once running, access OpenSearch Dashboards at [http://localhost:5601](http://localhost:5601).
+
+## Step 7: Run with Docker Compose
+
+For a more robust setup involving both OpenSearch and OpenSearch Dashboards, use Docker Compose.
+
+### Create `docker-compose.yml`
+
+Create a file named `docker-compose.yml` with the following content:
+
+```yaml
+services:
+  opensearch-node:
+    image: opensearchproject/opensearch:3.5.0
+    container_name: opensearch-node
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=MyStr0ngP@ssw0rd!
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - 9200:9200
+    networks:
+      - opensearch-net
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.5.0
+    container_name: opensearch-dashboards
+    ports:
+      - 5601:5601
+    environment:
+      OPENSEARCH_HOSTS: '["https://opensearch-node:9200"]'
+    networks:
+      - opensearch-net
+    depends_on:
+      - opensearch-node
+
+networks:
+  opensearch-net:
+```
+
+### Start the Services
+
+```bash
+docker compose up -d
+```
+
+### Verify Plugins
+
+Once the container is running, you can list the installed plugins:
+
+```bash
+docker exec opensearch-dashboards ls -1 /usr/share/opensearch-dashboards/plugins/
+```
+
