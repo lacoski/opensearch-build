@@ -24,7 +24,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Update packages and install required tools
 RUN apt-get update -y && apt-get upgrade -y && \
-    apt-get install -y tar gzip findutils && \
+    apt-get install -y tar gzip findutils npm && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Remove default ubuntu user/group (GID/UID 1000 conflict) and create opensearch-dashboards user
@@ -49,14 +49,12 @@ RUN tar -xzpf $TEMP_DIR/opensearch-dashboards-`uname -p`.tgz -C $OPENSEARCH_DASH
     ls -l $OPENSEARCH_DASHBOARDS_HOME && \
     rm -rf $TEMP_DIR
 
-# Patch CVEs: Install npm, download fixed packages to staging, then replace vulnerable copies in-place
+# Patch CVEs: Use npm to download fixed packages, then replace all vulnerable copies in-place
 SHELL ["/bin/bash", "-c"]
 RUN set -euo pipefail && \
-    apt-get update -y && apt-get install -y npm && \
-    export PATH=$OPENSEARCH_DASHBOARDS_HOME/node/bin:$PATH && \
     CVE_STAGING=/tmp/cve-patches && mkdir -p $CVE_STAGING && cd $CVE_STAGING && \
     npm init -y > /dev/null 2>&1 && \
-    npm install --save \
+    npm install --no-package-lock \
       ajv@8.18.0 \
       axios@1.13.5 \
       basic-ftp@5.2.0 \
@@ -67,44 +65,51 @@ RUN set -euo pipefail && \
       minimatch@3.1.4 \
       tar@7.5.11 \
       serialize-javascript@7.0.3 \
-      @tootallnate/once@3.0.1 && \
-    cd $CVE_STAGING && \
-    # Helper: replace_pkg <target_base> <pkg_name> [source_base] \
+      @tootallnate/once@3.0.1 \
+      @smithy/config-resolver@4.4.0 && \
+    echo "Staged packages:" && npm list --depth=0 && \
+    # Helper: replace_pkg <path_from_home> \
+    # Surgical replacement of specific folders reported in the CVE log \
     replace_pkg() { \
-      local t="$1/node_modules/$2"; \
-      local s="${3:-$CVE_STAGING}/node_modules/$2"; \
-      if [[ -d "$t" && -d "$s" ]]; then rm -rf "$t" && cp -a "$s" "$t" && echo "Patched: $t"; fi; \
+      local rel_path="$1"; \
+      local pkg_name=$(basename "$rel_path"); \
+      # Handle scoped packages (e.g., @smithy/config-resolver) \
+      if [[ "$rel_path" == *"@smithy"* ]]; then pkg_name="@smithy/config-resolver"; \
+      elif [[ "$rel_path" == *"@tootallnate"* ]]; then pkg_name="@tootallnate/once"; \
+      fi; \
+      local source="$CVE_STAGING/node_modules/$pkg_name"; \
+      local target="$OPENSEARCH_DASHBOARDS_HOME/$rel_path"; \
+      if [ -d "$source" ] && [ -d "$target" ]; then \
+        rm -rf "$target" && cp -a "$source" "$target" && echo "Patched: $target"; \
+      else \
+        echo "Skipping (not found): $target"; \
+      fi; \
     } && \
-    # Top-level node_modules \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME ajv && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME axios && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME bn.js && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME dompurify && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME fast-xml-parser && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME minimatch && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME tar && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME serialize-javascript && \
-    # Nested: @aws-sdk/xml-builder -> fast-xml-parser 5.x \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/node_modules/@aws-sdk/xml-builder fast-xml-parser && \
-    # Nested: asn1.js -> bn.js \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/node_modules/asn1.js bn.js && \
-    # Plugin: assistantDashboards \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/assistantDashboards @tootallnate/once && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/assistantDashboards dompurify && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/assistantDashboards minimatch && \
-    # Plugin: investigationDashboards \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/investigationDashboards ajv && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/investigationDashboards dompurify && \
-    # Plugin: observabilityDashboards \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/observabilityDashboards ajv && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/observabilityDashboards dompurify && \
-    # Plugin: reportsDashboards \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/reportsDashboards @tootallnate/once && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/reportsDashboards dompurify && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/reportsDashboards jspdf && \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/reportsDashboards minimatch && \
-    # Plugin: securityDashboards \
-    replace_pkg $OPENSEARCH_DASHBOARDS_HOME/plugins/securityDashboards basic-ftp && \
+    replace_pkg "node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@smithy/config-resolver" && \
+    replace_pkg "node_modules/@aws-sdk/token-providers/node_modules/@smithy/config-resolver" && \
+    replace_pkg "node_modules/@aws-sdk/xml-builder/node_modules/fast-xml-parser" && \
+    replace_pkg "node_modules/@smithy/config-resolver" && \
+    replace_pkg "node_modules/ajv" && \
+    replace_pkg "node_modules/asn1.js/node_modules/bn.js" && \
+    replace_pkg "node_modules/axios" && \
+    replace_pkg "node_modules/bn.js" && \
+    replace_pkg "node_modules/dompurify" && \
+    replace_pkg "node_modules/fast-xml-parser" && \
+    replace_pkg "node_modules/minimatch" && \
+    replace_pkg "node_modules/serialize-javascript" && \
+    replace_pkg "node_modules/tar" && \
+    replace_pkg "plugins/assistantDashboards/node_modules/@tootallnate/once" && \
+    replace_pkg "plugins/assistantDashboards/node_modules/dompurify" && \
+    replace_pkg "plugins/assistantDashboards/node_modules/minimatch" && \
+    replace_pkg "plugins/investigationDashboards/node_modules/ajv" && \
+    replace_pkg "plugins/investigationDashboards/node_modules/dompurify" && \
+    replace_pkg "plugins/observabilityDashboards/node_modules/ajv" && \
+    replace_pkg "plugins/observabilityDashboards/node_modules/dompurify" && \
+    replace_pkg "plugins/reportsDashboards/node_modules/@tootallnate/once" && \
+    replace_pkg "plugins/reportsDashboards/node_modules/dompurify" && \
+    replace_pkg "plugins/reportsDashboards/node_modules/jspdf" && \
+    replace_pkg "plugins/reportsDashboards/node_modules/minimatch" && \
+    replace_pkg "plugins/securityDashboards/node_modules/basic-ftp" && \
     # Cleanup \
     rm -rf $CVE_STAGING && \
     apt-get remove -y npm && apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/* && \

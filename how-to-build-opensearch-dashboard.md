@@ -117,7 +117,7 @@ docker run --rm opensearchproject/opensearch-dashboards:3.5.0 ls -1 /usr/share/o
 
 Both Dockerfiles (`opensearch-dashboards.al2023.dockerfile` and `opensearch-dashboards.ubuntu2404.dockerfile`) include an identical automated CVE patching step that runs during image build. It installs `npm` temporarily, downloads fixed package versions to a staging area, replaces all vulnerable copies in-place, and then removes `npm` to keep the final image clean.
 
-The following CVEs across 12 packages are patched (HIGH and CRITICAL are prioritized):
+The following CVEs across 13 packages are patched (HIGH and CRITICAL are prioritized):
 
 | Package | Vulnerable | Fixed | CVEs | Severity |
 |---------|-----------|-------|------|----------|
@@ -128,23 +128,22 @@ The following CVEs across 12 packages are patched (HIGH and CRITICAL are priorit
 | axios | 1.13.3 | 1.13.5 | CVE-2026-25639 | HIGH |
 | ajv | 8.12.0 | 8.18.0 | CVE-2025-69873 | MEDIUM |
 | bn.js | 4.12.0 | 4.12.3 | CVE-2026-2739 | MEDIUM |
-| dompurify | 3.2.4 | 3.3.2 | CVE-2025-15599, CVE-2026-0540 | LOW |
+| dompurify | 3.2.4 | 3.3.2 | CVE-2025-15599, CVE-2026-0540 | MEDIUM |
+| @smithy/config-resolver | 4.1.0 / 4.3.0 | 4.4.0 | GHSA-6475-r3vj-m8vf | LOW |
 | @tootallnate/once | 2.0.0 | 3.0.1 | CVE-2026-3449 | LOW |
 | minimatch | 3.1.2 | 3.1.4 | CVE-2026-26996, CVE-2026-27903, CVE-2026-27904 | LOW |
 | tar | 7.5.7 | 7.5.11 | CVE-2026-26960, CVE-2026-29786, CVE-2026-31802 | LOW |
 
 ### Patched Locations
 
-Packages are patched across all locations where they appear:
+The patching process uses a surgical replacement strategy. Instead of a broad search, it targets the exact folders reported in the vulnerability scan (e.g., `trivy-detech-cves.log`). This ensures that only the affected instances of a package are modified, maintaining the integrity of the rest of the installation.
 
-- **Top-level** `node_modules/`: ajv, axios, bn.js, dompurify, fast-xml-parser (5.5.6), minimatch, tar, serialize-javascript
-- **Nested** `node_modules/@aws-sdk/xml-builder/node_modules/`: fast-xml-parser (5.5.6)
-- **Nested** `node_modules/asn1.js/node_modules/`: bn.js
-- **Plugin** `plugins/assistantDashboards/node_modules/`: @tootallnate/once, dompurify, minimatch
-- **Plugin** `plugins/investigationDashboards/node_modules/`: ajv, dompurify
-- **Plugin** `plugins/observabilityDashboards/node_modules/`: ajv, dompurify
-- **Plugin** `plugins/reportsDashboards/node_modules/`: @tootallnate/once, dompurify, jspdf, minimatch
-- **Plugin** `plugins/securityDashboards/node_modules/`: basic-ftp
+Key target areas include:
+- **Top-level dependencies** in `node_modules/`
+- **Deeply nested dependencies** within specific libraries (e.g., `@aws-sdk/xml-builder`, `asn1.js`)
+- **Plugin-specific dependencies** (e.g., `assistantDashboards`, `reportsDashboards`, `securityDashboards`, etc.)
+
+This approach provides a deterministic and verifiable way to remediate CVEs while minimizing changes to the original distribution.
 
 ## Step 6: Run the Image
 
